@@ -3,11 +3,15 @@ package pool
 import (
 	"log"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func Test_Pool_slice_data_override(t *testing.T) {
@@ -185,4 +189,98 @@ func Test_Pool_Optional(t *testing.T) {
 	m.ReturnToVTPool()
 	mFromPool := MemoryPoolExtensionFromVTPool()
 	require.True(t, mFromPool.EqualVT(&MemoryPoolExtension{}))
+}
+
+func mustStruct(t *testing.T, m map[string]any) *structpb.Struct {
+	t.Helper()
+	st, err := structpb.NewStruct(m)
+	require.NoError(t, err)
+	return st
+}
+
+func marshalWKT(t *testing.T, m *WKTNestedPool) []byte {
+	t.Helper()
+	b, err := m.MarshalVT()
+	require.NoError(t, err)
+	return b
+}
+
+func Test_WKT_nested_pool_reuse(t *testing.T) {
+	filled := &WKTNestedPool{
+		Ts:  timestamppb.New(time.Unix(100, 5)),
+		St:  mustStruct(t, map[string]any{"a": 1.0, "b": []any{"x", 2.0}}),
+		Tss: []*timestamppb.Timestamp{timestamppb.New(time.Unix(1, 0)), timestamppb.New(time.Unix(2, 0))},
+		Sts: []*structpb.Struct{mustStruct(t, map[string]any{"k": "v"})},
+	}
+	filledBytes := marshalWKT(t, filled)
+	emptyBytes := marshalWKT(t, &WKTNestedPool{})
+
+	t.Run("fields are cleared on reuse", func(t *testing.T) {
+		msg := WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(filledBytes))
+		require.NotNil(t, msg.Ts)
+		require.NotNil(t, msg.St)
+		require.Len(t, msg.Tss, 2)
+		require.Len(t, msg.Sts, 1)
+		msg.ReturnToVTPool()
+
+		msg = WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(emptyBytes))
+		assert.Nil(t, msg.Ts)
+		assert.Nil(t, msg.St)
+		assert.Empty(t, msg.Tss)
+		assert.Empty(t, msg.Sts)
+		assert.Nil(t, msg.Choice)
+		msg.ReturnToVTPool()
+	})
+
+	t.Run("reused message equals a fresh unmarshal of the second payload", func(t *testing.T) {
+		second := &WKTNestedPool{
+			Ts:  timestamppb.New(time.Unix(7, 7)),
+			Tss: []*timestamppb.Timestamp{timestamppb.New(time.Unix(9, 0))},
+		}
+		secondBytes := marshalWKT(t, second)
+
+		msg := WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(filledBytes))
+		msg.ReturnToVTPool()
+
+		msg = WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(secondBytes))
+		assert.True(t, msg.EqualVT(second), "got %v, want %v", msg, second)
+		assert.True(t, proto.Equal(msg, second))
+		msg.ReturnToVTPool()
+	})
+
+	t.Run("oneof members are cleared and switchable", func(t *testing.T) {
+		withTs := marshalWKT(t, &WKTNestedPool{Choice: &WKTNestedPool_ChoiceTs{ChoiceTs: timestamppb.New(time.Unix(3, 0))}})
+		withDur := marshalWKT(t, &WKTNestedPool{Choice: &WKTNestedPool_ChoiceDur{ChoiceDur: durationpb.New(time.Second)}})
+
+		msg := WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(withTs))
+		require.NotNil(t, msg.GetChoiceTs())
+		msg.ReturnToVTPool()
+
+		msg = WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(withDur))
+		assert.Nil(t, msg.GetChoiceTs())
+		assert.Equal(t, time.Second, msg.GetChoiceDur().AsDuration())
+		msg.ReturnToVTPool()
+
+		msg = WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(emptyBytes))
+		assert.Nil(t, msg.Choice)
+		msg.ReturnToVTPool()
+	})
+
+	t.Run("CloneVT result is independent of the original", func(t *testing.T) {
+		msg := WKTNestedPoolFromVTPool()
+		require.NoError(t, msg.UnmarshalVT(filledBytes))
+		clone := msg.CloneVT()
+		require.True(t, clone.EqualVT(msg))
+		msg.ReturnToVTPool()
+
+		assert.True(t, proto.Equal(clone, filled), "clone was corrupted by returning the original")
+		clone.ReturnToVTPool()
+	})
 }

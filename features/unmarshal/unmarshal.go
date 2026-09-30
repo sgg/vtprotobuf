@@ -499,12 +499,16 @@ func (p *unmarshal) fieldItem(field *protogen.Field, fieldname string, message *
 			p.decodeMessage("oneof."+field.GoName, buf, field.Message)
 			p.P(`} else {`)
 			if p.ShouldPool(message) && p.ShouldPool(field.Message) {
-				p.P(`v := `, msgname, `FromVTPool()`)
+				p.PDeclFromVTPool("v", field.Message)
 			} else {
 				p.P(`v := &`, msgname, `{}`)
 			}
 			p.decodeMessage("v", buf, field.Message)
-			p.P(`m.`, fieldname, ` = &`, field.GoIdent, "{", field.GoName, `: v}`)
+			if p.IsWellKnownType(field.Message) && p.IsLocalWrapper(field.Message) {
+				p.P(`m.`, fieldname, ` = &`, field.GoIdent, "{", field.GoName, `: (*`, p.QualifiedGoIdent(field.Message.GoIdent), `)(v)}`)
+			} else {
+				p.P(`m.`, fieldname, ` = &`, field.GoIdent, "{", field.GoName, `: v}`)
+			}
 			p.P(`}`)
 		} else if field.Desc.IsMap() {
 			unique := proto.GetExtension(field.Desc.Options(), vtproto.E_Options).(*vtproto.Opts).GetUnique()
@@ -565,7 +569,7 @@ func (p *unmarshal) fieldItem(field *protogen.Field, fieldname string, message *
 		} else {
 			p.P(`if m.`, fieldname, ` == nil {`)
 			if p.ShouldPool(message) && p.ShouldPool(field.Message) {
-				p.P(`m.`, fieldname, ` = `, field.Message.GoIdent, `FromVTPool()`)
+				p.PAssignFromVTPool("m."+fieldname, field.Message)
 			} else {
 				p.P(`m.`, fieldname, ` = &`, field.Message.GoIdent, `{}`)
 			}
