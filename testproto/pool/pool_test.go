@@ -284,3 +284,55 @@ func Test_WKT_nested_pool_reuse(t *testing.T) {
 		clone.ReturnToVTPool()
 	})
 }
+
+func Test_Pool_Reuse_Map(t *testing.T) {
+	allocs := testing.AllocsPerRun(10, func() {
+		obj := MapReuseTest1FromVTPool()
+		if obj.GetIntToStringMap() == nil {
+			obj.IntToStringMap = make(map[int32]string)
+		}
+		obj.IntToStringMap[1] = "test1"
+		obj.IntToStringMap[2] = "test2"
+		obj.IntToStringMap[3] = "test3"
+		if obj.GetStringToEnumMap() == nil {
+			obj.StringToEnumMap = make(map[string]MapReuseTest1_TEST)
+		}
+		obj.StringToEnumMap["test1"] = MapReuseTest1_test1
+		obj.StringToEnumMap["test2"] = MapReuseTest1_test2
+		obj.ReturnToVTPool()
+	})
+	require.Less(t, int(allocs), 1)
+}
+
+func Test_Pool_Map_PooledValues(t *testing.T) {
+	v := MapReuseTest1FromVTPool()
+	v.IntToStringMap = map[int32]string{1: "a"}
+
+	obj := MapReuseTest2FromVTPool()
+	obj.Count = 7
+	obj.IntToMapReuseTest1Map = map[int32]*MapReuseTest1{1: v, 2: nil}
+	obj.IntToTestObjWithoutPoolMap = map[int32]*TestObjWithoutPool{1: {Name: "x"}, 2: nil}
+
+	// nil map values must not panic
+	require.NotPanics(t, obj.ReturnToVTPool)
+
+	// values returned to the pool are reset
+	require.Empty(t, v.IntToStringMap)
+
+	got := MapReuseTest2FromVTPool()
+	require.Zero(t, got.Count)
+	require.Empty(t, got.IntToMapReuseTest1Map)
+	require.Empty(t, got.IntToTestObjWithoutPoolMap)
+	got.ReturnToVTPool()
+}
+
+func Test_Pool_Map_NilMapAndWKTValues(t *testing.T) {
+	require.NotPanics(t, func() { MapReuseTest2FromVTPool().ReturnToVTPool() })
+
+	obj := MapReuseTest3FromVTPool()
+	obj.StringToTimestampMap = map[string]*timestamppb.Timestamp{"a": timestamppb.Now(), "b": nil}
+	obj.ReturnToVTPool()
+	got := MapReuseTest3FromVTPool()
+	require.Empty(t, got.StringToTimestampMap)
+	got.ReturnToVTPool()
+}

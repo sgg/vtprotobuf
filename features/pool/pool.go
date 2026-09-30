@@ -68,6 +68,19 @@ func (p *pool) message(message *protogen.Message) {
 			}
 			p.P(fmt.Sprintf("f%d", len(saved)), ` := m.`, fieldName, `[:0]`)
 			saved = append(saved, field)
+		} else if field.Desc.IsMap() {
+			// Pooled message values go back to their pool; other values are dropped
+			// by clear. The map itself is kept so its buckets are reused.
+			if valueField := field.Message.Fields[1]; valueField.Message != nil && p.ShouldPool(valueField.Message) {
+				p.P(`for _, v := range m.`, fieldName, `{`)
+				p.P(`if v != nil {`)
+				p.PReturnToVTPool("v", valueField.Message)
+				p.P(`}`)
+				p.P(`}`)
+			}
+			p.P(`clear(m.`, fieldName, `)`)
+			p.P(fmt.Sprintf("f%d", len(saved)), ` := m.`, fieldName)
+			saved = append(saved, field)
 		} else if field.Oneof != nil && !field.Oneof.Desc.IsSynthetic() {
 			if p.ShouldPool(field.Message) {
 				p.P(`if oneof, ok := m.`, field.Oneof.GoName, `.(*`, field.GoIdent, `); ok {`)
@@ -77,7 +90,7 @@ func (p *pool) message(message *protogen.Message) {
 		} else {
 			switch field.Desc.Kind() {
 			case protoreflect.MessageKind, protoreflect.GroupKind:
-				if !field.Desc.IsMap() && p.ShouldPool(field.Message) {
+				if p.ShouldPool(field.Message) {
 					p.PReturnToVTPool("m."+fieldName, field.Message)
 				}
 			case protoreflect.BytesKind:

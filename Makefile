@@ -62,6 +62,7 @@ gen-testproto: get-grpc-testproto gen-wkt-testproto install
 		testproto/empty/empty.proto \
 		testproto/pool/pool.proto \
 		testproto/pool/pool_with_slice_reuse.proto \
+		testproto/pool/pool_with_map_reuse.proto \
 		testproto/pool/pool_with_oneof.proto \
 		testproto/pool/wkt_pool.proto \
 		testproto/proto3opt/opt.proto \
