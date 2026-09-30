@@ -80,7 +80,19 @@ func (p *GeneratedFile) PDeclFromVTPool(vname string, message *protogen.Message)
 
 // PAssignFromVTPool emits `target = <pooled message>`. Caller must ensure ShouldPool(message).
 func (p *GeneratedFile) PAssignFromVTPool(target string, message *protogen.Message) {
-	p.P(append([]any{target, " = "}, p.fromVTPool(message)...)...)
+	expr := p.fromVTPool(message)
+	if p.IsLocalWrapper(message) {
+		// The wrapper shares its layout with the underlying message, which is the type targets hold.
+		expr = p.convertExpr(message, expr)
+	}
+	p.P(append([]any{target, " = "}, expr...)...)
+}
+
+// convertExpr wraps expr in a pointer conversion to the message's own Go type.
+func (p *GeneratedFile) convertExpr(message *protogen.Message, expr []any) []any {
+	out := []any{"(*", p.QualifiedGoIdent(message.GoIdent), ")("}
+	out = append(out, expr...)
+	return append(out, ")")
 }
 
 func (p *GeneratedFile) fromVTPool(message *protogen.Message) []any {
@@ -259,7 +271,7 @@ func (p *GeneratedFile) Wrapper() bool {
 	return p.Config.Wrap
 }
 
-// IsLocalWrapper is true if the (wrap=true) is true for the message.
+// IsLocalWrapper is true when wrap=true and the message belongs to a locally generated package.
 func (p *GeneratedFile) IsLocalWrapper(message *protogen.Message) bool {
 	return p.Wrapper() && p.IsLocalMessage(message)
 }

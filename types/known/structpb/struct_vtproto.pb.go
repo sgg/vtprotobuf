@@ -1254,7 +1254,7 @@ func (m *Struct) UnmarshalVT(dAtA []byte) error {
 					if postmsgIndex > l {
 						return io.ErrUnexpectedEOF
 					}
-					mapvalue = &structpb.Value{}
+					mapvalue = (*structpb.Value)(ValueFromVTPool())
 					if err := (*Value)(mapvalue).UnmarshalVT(dAtA[iNdEx:postmsgIndex]); err != nil {
 						return err
 					}
@@ -1744,7 +1744,7 @@ func (m *Struct) UnmarshalVTUnsafe(dAtA []byte) error {
 					if postmsgIndex > l {
 						return io.ErrUnexpectedEOF
 					}
-					mapvalue = &structpb.Value{}
+					mapvalue = (*structpb.Value)(ValueFromVTPool())
 					if err := (*Value)(mapvalue).UnmarshalVTUnsafe(dAtA[iNdEx:postmsgIndex]); err != nil {
 						return err
 					}

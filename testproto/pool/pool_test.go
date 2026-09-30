@@ -285,54 +285,118 @@ func Test_WKT_nested_pool_reuse(t *testing.T) {
 	})
 }
 
-func Test_Pool_Reuse_Map(t *testing.T) {
-	allocs := testing.AllocsPerRun(10, func() {
-		obj := MapReuseTest1FromVTPool()
-		if obj.GetIntToStringMap() == nil {
-			obj.IntToStringMap = make(map[int32]string)
-		}
-		obj.IntToStringMap[1] = "test1"
-		obj.IntToStringMap[2] = "test2"
-		obj.IntToStringMap[3] = "test3"
-		if obj.GetStringToEnumMap() == nil {
-			obj.StringToEnumMap = make(map[string]MapReuseTest1_TEST)
-		}
-		obj.StringToEnumMap["test1"] = MapReuseTest1_test1
-		obj.StringToEnumMap["test2"] = MapReuseTest1_test2
-		obj.ReturnToVTPool()
+func Test_Pool_Map(t *testing.T) {
+	t.Run("reset", func(t *testing.T) {
+		t.Run("reuses map allocation", func(t *testing.T) {
+			allocs := testing.AllocsPerRun(10, func() {
+				obj := MapReuseTest1FromVTPool()
+				if obj.GetIntToStringMap() == nil {
+					obj.IntToStringMap = make(map[int32]string)
+				}
+				obj.IntToStringMap[1] = "test1"
+				obj.IntToStringMap[2] = "test2"
+				obj.IntToStringMap[3] = "test3"
+				if obj.GetStringToEnumMap() == nil {
+					obj.StringToEnumMap = make(map[string]MapReuseTest1_TEST)
+				}
+				obj.StringToEnumMap["test1"] = MapReuseTest1_test1
+				obj.StringToEnumMap["test2"] = MapReuseTest1_test2
+				obj.ReturnToVTPool()
+			})
+			require.Less(t, int(allocs), 1)
+		})
+
+		t.Run("returns pooled values and tolerates nil values", func(t *testing.T) {
+			v := MapReuseTest1FromVTPool()
+			v.IntToStringMap = map[int32]string{1: "a"}
+
+			obj := MapReuseTest2FromVTPool()
+			obj.Count = 7
+			obj.IntToMapReuseTest1Map = map[int32]*MapReuseTest1{1: v, 2: nil}
+			obj.IntToTestObjWithoutPoolMap = map[int32]*TestObjWithoutPool{1: {Name: "x"}, 2: nil}
+
+			require.NotPanics(t, obj.ReturnToVTPool)
+			require.Empty(t, v.IntToStringMap) // returned values are reset
+
+			got := MapReuseTest2FromVTPool()
+			require.Zero(t, got.Count)
+			require.Empty(t, got.IntToMapReuseTest1Map)
+			require.Empty(t, got.IntToTestObjWithoutPoolMap)
+			got.ReturnToVTPool()
+		})
+
+		t.Run("nil map and WKT values", func(t *testing.T) {
+			require.NotPanics(t, func() { MapReuseTest2FromVTPool().ReturnToVTPool() })
+
+			obj := MapReuseTest3FromVTPool()
+			obj.StringToTimestampMap = map[string]*timestamppb.Timestamp{"a": timestamppb.Now(), "b": nil}
+			obj.ReturnToVTPool()
+			got := MapReuseTest3FromVTPool()
+			require.Empty(t, got.StringToTimestampMap)
+			got.ReturnToVTPool()
+		})
 	})
-	require.Less(t, int(allocs), 1)
-}
 
-func Test_Pool_Map_PooledValues(t *testing.T) {
-	v := MapReuseTest1FromVTPool()
-	v.IntToStringMap = map[int32]string{1: "a"}
+	t.Run("unmarshal", func(t *testing.T) {
+		t.Run("round trip into dirtied pooled parent", func(t *testing.T) {
+			src := &MapReuseTest2{
+				Count: 3,
+				IntToMapReuseTest1Map: map[int32]*MapReuseTest1{
+					1: {IntToStringMap: map[int32]string{1: "a", 2: "b"}},
+					2: {StringToEnumMap: map[string]MapReuseTest1_TEST{"x": MapReuseTest1_test2}},
+				},
+				IntToTestObjWithoutPoolMap: map[int32]*TestObjWithoutPool{1: {Name: "n", Age: 9}},
+			}
+			data, err := src.MarshalVT()
+			require.NoError(t, err)
 
-	obj := MapReuseTest2FromVTPool()
-	obj.Count = 7
-	obj.IntToMapReuseTest1Map = map[int32]*MapReuseTest1{1: v, 2: nil}
-	obj.IntToTestObjWithoutPoolMap = map[int32]*TestObjWithoutPool{1: {Name: "x"}, 2: nil}
+			// Dirty the pool first so stale state would show up.
+			dirty := MapReuseTest2FromVTPool()
+			dirty.Count = 99
+			dirty.IntToMapReuseTest1Map = map[int32]*MapReuseTest1{7: MapReuseTest1FromVTPool()}
+			dirty.IntToMapReuseTest1Map[7].IntToStringMap = map[int32]string{7: "stale"}
+			dirty.ReturnToVTPool()
 
-	// nil map values must not panic
-	require.NotPanics(t, obj.ReturnToVTPool)
+			got := MapReuseTest2FromVTPool()
+			require.NoError(t, got.UnmarshalVT(data))
+			require.True(t, proto.Equal(src, got))
+			got.ReturnToVTPool()
+		})
 
-	// values returned to the pool are reset
-	require.Empty(t, v.IntToStringMap)
+		t.Run("WKT values", func(t *testing.T) {
+			src := &MapReuseTest3{StringToTimestampMap: map[string]*timestamppb.Timestamp{
+				"a": timestamppb.New(time.Unix(10, 5)),
+				"b": timestamppb.New(time.Unix(20, 0)),
+			}}
+			data, err := src.MarshalVT()
+			require.NoError(t, err)
 
-	got := MapReuseTest2FromVTPool()
-	require.Zero(t, got.Count)
-	require.Empty(t, got.IntToMapReuseTest1Map)
-	require.Empty(t, got.IntToTestObjWithoutPoolMap)
-	got.ReturnToVTPool()
-}
+			for range 3 {
+				got := MapReuseTest3FromVTPool()
+				require.NoError(t, got.UnmarshalVT(data))
+				require.True(t, proto.Equal(src, got))
+				got.ReturnToVTPool()
+			}
+		})
 
-func Test_Pool_Map_NilMapAndWKTValues(t *testing.T) {
-	require.NotPanics(t, func() { MapReuseTest2FromVTPool().ReturnToVTPool() })
+		t.Run("allocates fewer values than unpooled", func(t *testing.T) {
+			src := &MapReuseTest2{IntToMapReuseTest1Map: map[int32]*MapReuseTest1{
+				1: {StringToEnumMap: map[string]MapReuseTest1_TEST{"x": MapReuseTest1_test2}},
+			}}
+			data, err := src.MarshalVT()
+			require.NoError(t, err)
 
-	obj := MapReuseTest3FromVTPool()
-	obj.StringToTimestampMap = map[string]*timestamppb.Timestamp{"a": timestamppb.Now(), "b": nil}
-	obj.ReturnToVTPool()
-	got := MapReuseTest3FromVTPool()
-	require.Empty(t, got.StringToTimestampMap)
-	got.ReturnToVTPool()
+			// The StringToEnumMap key string still allocates on every unmarshal,
+			// so compare against the unpooled path instead of asserting zero.
+			pooled := testing.AllocsPerRun(20, func() {
+				m := MapReuseTest2FromVTPool()
+				_ = m.UnmarshalVT(data)
+				m.ReturnToVTPool()
+			})
+			unpooled := testing.AllocsPerRun(20, func() {
+				_ = (&MapReuseTest2{}).UnmarshalVT(data)
+			})
+			require.Less(t, pooled, unpooled)
+		})
+	})
 }

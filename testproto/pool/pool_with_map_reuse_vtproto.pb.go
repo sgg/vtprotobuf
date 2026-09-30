@@ -1465,7 +1465,7 @@ func (m *MapReuseTest2) UnmarshalVT(dAtA []byte) error {
 					if postmsgIndex > l {
 						return io.ErrUnexpectedEOF
 					}
-					mapvalue = &MapReuseTest1{}
+					mapvalue = MapReuseTest1FromVTPool()
 					if err := mapvalue.UnmarshalVT(dAtA[iNdEx:postmsgIndex]); err != nil {
 						return err
 					}
@@ -1779,7 +1779,7 @@ func (m *MapReuseTest3) UnmarshalVT(dAtA []byte) error {
 					if postmsgIndex > l {
 						return io.ErrUnexpectedEOF
 					}
-					mapvalue = &timestamppb.Timestamp{}
+					mapvalue = (*timestamppb.Timestamp)((*timestamppb1.Timestamp)(timestamppb1.TimestampFromVTPool()))
 					if err := (*timestamppb1.Timestamp)(mapvalue).UnmarshalVT(dAtA[iNdEx:postmsgIndex]); err != nil {
 						return err
 					}
@@ -2336,7 +2336,7 @@ func (m *MapReuseTest2) UnmarshalVTUnsafe(dAtA []byte) error {
 					if postmsgIndex > l {
 						return io.ErrUnexpectedEOF
 					}
-					mapvalue = &MapReuseTest1{}
+					mapvalue = MapReuseTest1FromVTPool()
 					if err := mapvalue.UnmarshalVTUnsafe(dAtA[iNdEx:postmsgIndex]); err != nil {
 						return err
 					}
@@ -2654,7 +2654,7 @@ func (m *MapReuseTest3) UnmarshalVTUnsafe(dAtA []byte) error {
 					if postmsgIndex > l {
 						return io.ErrUnexpectedEOF
 					}
-					mapvalue = &timestamppb.Timestamp{}
+					mapvalue = (*timestamppb.Timestamp)((*timestamppb1.Timestamp)(timestamppb1.TimestampFromVTPool()))
 					if err := (*timestamppb1.Timestamp)(mapvalue).UnmarshalVTUnsafe(dAtA[iNdEx:postmsgIndex]); err != nil {
 						return err
 					}
