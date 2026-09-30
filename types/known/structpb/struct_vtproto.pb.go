@@ -920,7 +920,15 @@ var vtprotoPool_Struct = sync.Pool{
 
 func (m *Struct) ResetVT() {
 	if m != nil {
+		for _, v := range m.Fields {
+			if v != nil {
+				(*Value)(v).ReturnToVTPool()
+			}
+		}
+		clear(m.Fields)
+		f0 := m.Fields
 		(*structpb.Struct)(m).Reset()
+		m.Fields = f0
 	}
 }
 func (m *Struct) ReturnToVTPool() {
